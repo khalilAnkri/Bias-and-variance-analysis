@@ -1,5 +1,9 @@
 # utils.py
 import numpy as np
+from sklearn.ensemble import BaggingRegressor  # <--- add this
+from sklearn.linear_model import Ridge
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.tree import DecisionTreeRegressor
 
 
 def h(x):
@@ -87,3 +91,63 @@ def display_results(name, results):
     print(f"Residual   : {results['residual']:.4f}")
     print(f"Total error: {results['total']:.4f}")
     print("\n")
+
+import numpy as np
+
+def estimate_bias_variance(model_class, model_params, N=80, p=5, M=100, sigma=1.0, seed=None, generate_data=None, h=None):
+
+    if generate_data is None or h is None:
+        raise ValueError("generate_data and h functions must be provided")
+
+    rng = np.random.default_rng(seed)
+
+    # Generate test set
+    X_test, _ = generate_data(500, p, sigma=0, seed=seed)
+    n_test = X_test.shape[0]
+    all_preds = np.zeros((M, n_test))
+
+    for m in range(M):
+        X_train, y_train = generate_data(N, p, sigma=sigma,
+                                         seed=None if seed is None else seed + m)
+        model = model_class(**model_params)
+        model.fit(X_train, y_train)
+        all_preds[m] = model.predict(X_test)
+
+    y_pred_mean = all_preds.mean(axis=0)
+    y_true = h(X_test)
+
+    bias2 = np.mean((y_true - y_pred_mean)**2)
+    variance = np.mean(np.var(all_preds, axis=0))
+    residual = sigma**2
+    total = bias2 + variance + residual
+
+    return bias2, variance, residual, total
+
+
+
+def bagging_bias_variance(base_model_class, model_params, N=80, p=5, M=100, sigma=1.0, seed=None, n_estimators_list=[1,5,10,20]):
+    results = []
+
+    for n_models in n_estimators_list:
+        all_preds = np.zeros((M, 500))  # fixed test set size
+        X_test, _ = generate_data(500, p, sigma=0, seed=seed)
+
+        for m in range(M):
+            X_train, y_train = generate_data(N, p, sigma=sigma,
+                                             seed=None if seed is None else seed + m)
+            base_model = base_model_class(**model_params)
+            bag_model = BaggingRegressor(base_model, n_estimators=n_models, random_state=seed)
+            bag_model.fit(X_train, y_train)
+            all_preds[m] = bag_model.predict(X_test)
+
+        y_pred_mean = all_preds.mean(axis=0)
+        y_true = h(X_test)
+
+        bias2 = np.mean((y_true - y_pred_mean)**2)
+        variance = np.mean(np.var(all_preds, axis=0))
+        residual = sigma**2
+        total = bias2 + variance + residual
+
+        results.append([n_models, bias2, variance, residual, total])
+
+    return np.array(results)  # columns: n_models, bias², variance, residual, total
